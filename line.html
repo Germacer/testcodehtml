@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Seta Interativa - Bússola</title>
+    <style>
+        /* Estilos básicos para centrar o conteúdo e dar um visual limpo */
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* Evita que a página faça scroll acidental */
+        }
+
+        #startBtn {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            z-index: 10;
+        }
+
+        /* Esconde o contentor do SVG até o utilizador dar permissão */
+        #containerSeta {
+            display: none;
+            width: 100%;
+            height: 100%;
+            max-width: 400px;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Botão necessário para pedir permissão aos sensores (Obrigatório no iOS) -->
+    <button id="startBtn">Ativar Seta Dinâmica</button>
+
+    <div id="containerSeta">
+        <svg viewBox="0 0 100 200">
+            <defs>
+                <!-- Definição da ponta da seta (triângulo) que fica no fim da linha -->
+                <marker id="pontaSeta" viewBox="0 0 10 10" refX="5" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#333" />
+                </marker>
+            </defs>
+            
+            <!-- A nossa linha curva. 
+                 M: Move para baixo (50, 180)
+                 Q: Curva Quadrática. O primeiro par (50, 100) é o ponto de controlo que vamos mover com JS.
+                 O segundo par (50, 20) é o topo da seta. -->
+            <path id="linhaAnimada" d="M 50 180 Q 50 100 50 20" 
+                  stroke="#333" stroke-width="4" fill="none" 
+                  stroke-linecap="round" marker-end="url(#pontaSeta)" />
+        </svg>
+    </div>
+
+    <script>
+        // === VARIÁVEIS DE ESTADO ===
+        let ultimaDirecao = null; // Guarda a direção (alpha) da frame anterior
+        let pontoControloAtualX = 50; // O meio da tela no SVG (linha reta)
+        let pontoControloAlvoX = 50;  // Onde a linha *quer* ir dependendo da rotação
+        
+        // Parâmetros que podes ajustar!
+        const SENSIBILIDADE = 4; // Quão rápido a linha curva quando giras o telemóvel
+        const SUAVIZACAO = 0.1;  // Quão suave a linha acompanha o movimento (0.01 a 1)
+
+        // Função para iniciar os sensores ao clicar no botão
+        document.getElementById('startBtn').addEventListener('click', () => {
+            // Verifica se o dispositivo requer pedido de permissão (iOS 13+)
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            iniciarSeta();
+                        } else {
+                            alert("Permissão negada. A seta não vai funcionar.");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Dispositivos Android e navegadores mais antigos
+                iniciarSeta();
+            }
+        });
+
+        function iniciarSeta() {
+            // Esconde o botão e mostra a seta
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('containerSeta').style.display = 'block';
+
+            // Começa a ouvir os movimentos do dispositivo
+            window.addEventListener('deviceorientation', lidarComOrientacao);
+            
+            // Inicia o ciclo de animação
+            animarSeta();
+        }
+
+        function lidarComOrientacao(evento) {
+            let direcaoAtual = evento.alpha; // Valor de 0 a 360 graus
+
+            if (ultimaDirecao === null) {
+                ultimaDirecao = direcaoAtual;
+                return;
+            }
+
+            // Calcula a diferença entre a direção atual e a última (velocidade do giro)
+            let delta = direcaoAtual - ultimaDirecao;
+
+            // Corrige o salto matemático quando a bússola passa do grau 360 para o 0
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+
+            // Define o alvo da curva. 50 é o centro. 
+            // Multiplicamos o giro pela sensibilidade.
+            pontoControloAlvoX = 50 + (delta * SENSIBILIDADE);
+
+            // Limita a curva para que a linha não saia da tela
+            if (pontoControloAlvoX < -50) pontoControloAlvoX = -50;
+            if (pontoControloAlvoX > 150) pontoControloAlvoX = 150;
+
+            ultimaDirecao = direcaoAtual;
+        }
+
+        function animarSeta() {
+            // 1. Movemos suavemente o ponto de controlo atual em direção ao alvo
+            pontoControloAtualX += (pontoControloAlvoX - pontoControloAtualX) * SUAVIZACAO;
+
+            // 2. A MAGIA DA ESTABILIZAÇÃO:
+            // Constantemente puxamos o ALVO de volta para o centro (50).
+            // Se o telemóvel parar de girar, o delta será 0 e isto fará a linha voltar ao estado reto.
+            pontoControloAlvoX += (50 - pontoControloAlvoX) * 0.05;
+
+            // 3. Atualizamos o HTML do SVG com a nova curva
+            const caminhoSeta = document.getElementById('linhaAnimada');
+            // M = início, Q = Ponto de Controlo X e Y, Fim X e Y
+            caminhoSeta.setAttribute('d', `M 50 180 Q ${pontoControloAtualX} 100 50 20`);
+
+            // Pede ao navegador para chamar esta função na próxima frame (cria o loop de vídeo fluido)
+            requestAnimationFrame(animarSeta);
+        }
+    </script>
+</body>
+</html>
